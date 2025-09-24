@@ -1,20 +1,71 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import Image from "next/image";
 import Nav from "../components/Nav";
 import InlineNav from "../components/InlineNav";
 
+/* ---------- types ---------- */
 type MatchType = "exact" | "phrase" | "broad";
-type Row = { campaign: string; adGroup: string; keyword: string; match: MatchType; impr: number; clicks: number; spend: number; sales: number; orders: number; bid: number; };
-type CampaignPolicy = { campaign: string; targetROAS: number; minClicks: number; bidFloor: number; bidCeil: number; dailyBudget: number; maxReallocPct: number; };
-type BidChange = { campaign: string; adGroup: string; keyword: string; match: MatchType; currentBid: number; newBid: number; rationale: string; };
-type Negative = { campaign: string; adGroup: string; keyword: string; match: MatchType; reason: string; };
-type BudgetMove = { from: string; to: string; amount: number; rationale: string; };
+type Row = {
+  campaign: string;
+  adGroup: string;
+  keyword: string;
+  match: MatchType;
+  impr: number;
+  clicks: number;
+  spend: number;
+  sales: number;
+  orders: number;
+  bid: number;
+};
+type CampaignPolicy = {
+  campaign: string;
+  targetROAS: number;
+  minClicks: number;
+  bidFloor: number;
+  bidCeil: number;
+  dailyBudget: number;
+  maxReallocPct: number;
+};
+type BidChange = {
+  campaign: string;
+  adGroup: string;
+  keyword: string;
+  match: MatchType;
+  currentBid: number;
+  newBid: number;
+  rationale: string;
+};
+type Negative = {
+  campaign: string;
+  adGroup: string;
+  keyword: string;
+  match: MatchType;
+  reason: string;
+};
+type BudgetMove = { from: string; to: string; amount: number; rationale: string };
+type StepId =
+  | "Plan"
+  | "Load Metrics"
+  | "Propose Bids"
+  | "Budget Realloc"
+  | "Approval"
+  | "Apply & Log";
+
+/* ---------- constants moved to module scope ---------- */
+const STEPS: StepId[] = [
+  "Plan",
+  "Load Metrics",
+  "Propose Bids",
+  "Budget Realloc",
+  "Approval",
+  "Apply & Log",
+];
 
 const POLICY: CampaignPolicy[] = [
-  { campaign: "Campaign A", targetROAS: 3.0, minClicks: 10, bidFloor: 0.2, bidCeil: 2.5, dailyBudget: 100, maxReallocPct: 0.20 },
-  { campaign: "Campaign B", targetROAS: 2.5, minClicks: 12, bidFloor: 0.15, bidCeil: 2.0, dailyBudget: 80,  maxReallocPct: 0.20 },
+  { campaign: "Campaign A", targetROAS: 3.0, minClicks: 10, bidFloor: 0.2, bidCeil: 2.5, dailyBudget: 100, maxReallocPct: 0.2 },
+  { campaign: "Campaign B", targetROAS: 2.5, minClicks: 12, bidFloor: 0.15, bidCeil: 2.0, dailyBudget: 80,  maxReallocPct: 0.2 },
 ];
 
 const DATA: Row[] = [
@@ -26,6 +77,7 @@ const DATA: Row[] = [
   { campaign: "Campaign B", adGroup: "Cables",   keyword: "best usb c cable",   match: "broad",  impr: 4700, clicks: 95,  spend: 90.0,  sales: 150.0, orders: 12, bid: 0.75 },
 ];
 
+/* ---------- helpers ---------- */
 function cpc(r: Row) { return r.clicks > 0 ? r.spend / r.clicks : 0; }
 function ctr(r: Row) { return r.impr > 0 ? r.clicks / r.impr : 0; }
 function acos(r: Row) { return r.sales > 0 ? r.spend / r.sales : Infinity; }
@@ -57,8 +109,8 @@ function proposeBid(r: Row, policy: CampaignPolicy): BidChange | Negative | null
 
   const rationale =
     (kRoas < policy.targetROAS
-      ? `ROAS ${kRoas.toFixed(2)} below target ${policy.targetROAS.toFixed(2)} → lower bid`
-      : `ROAS ${kRoas.toFixed(2)} above target ${policy.targetROAS.toFixed(2)} → raise bid`) +
+      ? `ROAS ${kRoas.toFixed(2)} < target ${policy.targetROAS.toFixed(2)} → lower bid`
+      : `ROAS ${kRoas.toFixed(2)} > target ${policy.targetROAS.toFixed(2)} → raise bid`) +
     `; clicks ${r.clicks}, conv ${(convRate(r) * 100).toFixed(1)}%, CPC ${money(cpc(r))}.`;
 
   return { campaign: r.campaign, adGroup: r.adGroup, keyword: r.keyword, match: r.match, currentBid: r.bid, newBid: nb, rationale };
@@ -67,18 +119,8 @@ function proposeBid(r: Row, policy: CampaignPolicy): BidChange | Negative | null
 function summarizeCampaign(campaign: string, rows: Row[]) {
   const s = rows
     .filter((r) => r.campaign === campaign)
-    .reduce(
-      (a, r) => {
-        a.impr += r.impr;
-        a.clicks += r.clicks;
-        a.spend += r.spend;
-        a.sales += r.sales;
-        a.orders += r.orders;
-        return a;
-      },
-      { impr: 0, clicks: 0, spend: 0, sales: 0, orders: 0 }
-    );
-  return { ...s, ctr: s.impr ? s.clicks / s.impr : 0, cpc: s.clicks ? s.spend / s.clicks : 0, roas: s.spend ? s.sales / s.spend : 0, acos: s.sales ? s.spend / s.sales : Infinity };
+    .reduce((a, r) => { a.impr+=r.impr; a.clicks+=r.clicks; a.spend+=r.spend; a.sales+=r.sales; a.orders+=r.orders; return a; }, { impr:0, clicks:0, spend:0, sales:0, orders:0 });
+  return { ...s, ctr: s.impr ? s.clicks/s.impr : 0, cpc: s.clicks ? s.spend/s.clicks : 0, roas: s.spend ? s.sales/s.spend : 0, acos: s.sales ? s.spend/s.sales : Infinity };
 }
 
 function planBudgetMoves(rows: Row[], policy: CampaignPolicy[]): BudgetMove[] {
@@ -89,17 +131,11 @@ function planBudgetMoves(rows: Row[], policy: CampaignPolicy[]): BudgetMove[] {
   if (!worst || !best || worst.p.campaign === best.p.campaign) return [];
   const amount = Math.min(worst.p.dailyBudget * worst.p.maxReallocPct, 20);
   if (amount <= 0) return [];
-  return [
-    {
-      from: worst.p.campaign,
-      to: best.p.campaign,
-      amount,
-      rationale: `Shift ${money(amount)} from lower ROAS (${worst.s.roas.toFixed(2)}) to higher ROAS (${best.s.roas.toFixed(2)})`,
-    },
-  ];
+  return [{ from: worst.p.campaign, to: best.p.campaign, amount, rationale: `Shift ${money(amount)} from lower ROAS (${worst.s.roas.toFixed(2)}) to higher ROAS (${best.s.roas.toFixed(2)})` }];
 }
 
-const colors = { bg: "#fff", ink: "#111", muted: "#6b7280", border: "#e5e7eb", card: "#fff", accent: "#1d4ed8", good: "#0a7f2e", warn: "#b45309" } as const;
+/* ---------- styles ---------- */
+const colors = { bg:"#fff", ink:"#111", muted:"#6b7280", border:"#e5e7eb", card:"#fff", accent:"#1d4ed8", good:"#0a7f2e", warn:"#b45309" } as const;
 
 const styles: Record<string, React.CSSProperties> = {
   page: { background: colors.bg, color: colors.ink, minHeight: "100vh", fontFamily: 'Calibri, Arial, "Times New Roman", system-ui', lineHeight: 1.35 },
@@ -123,15 +159,19 @@ const styles: Record<string, React.CSSProperties> = {
   kpiValueWarn: { fontSize: 18, marginTop: 2, color: colors.warn },
 };
 
-function btn(): React.CSSProperties {
-  return { background: colors.accent, color: "#fff", border: "none", padding: "10px 14px", borderRadius: 10, cursor: "pointer", fontWeight: 600, outlineColor: "#93c5fd" };
-}
+function btn(): React.CSSProperties { return { background: colors.accent, color: "#fff", border: "none", padding: "10px 14px", borderRadius: 10, cursor: "pointer", fontWeight: 600, outlineColor: "#93c5fd" }; }
+function step(active: boolean, done: boolean): React.CSSProperties { return { display:"flex", gap:8, alignItems:"flex-start", padding:10, border:`1px solid ${colors.border}`, borderRadius:10, background:done?"#eef2ff":"#f9fafb", marginBottom:8, boxShadow:active?"inset 0 0 0 2px #bfdbfe":"none" }; }
+function bullet(active: boolean, done: boolean): React.CSSProperties { return { width:10, height:10, borderRadius:"50%", marginTop:6, background:done?colors.good:active?colors.accent:"#d1d5db", flex:"0 0 10px" }; }
 
+/* ---------- component ---------- */
 export default function Page() {
   const [started, setStarted] = useState(false);
   const [canApprove, setCanApprove] = useState(false);
   const [approved, setApproved] = useState(false);
+  const [activeStep, setActiveStep] = useState<StepId | null>(null);
+  const [receipt, setReceipt] = useState("{ pending }");
 
+  // precompute proposals so the middle panel isn't blank
   const bidChanges = useMemo(() => {
     const out: (BidChange | Negative)[] = [];
     for (const row of DATA) {
@@ -141,26 +181,42 @@ export default function Page() {
     }
     return out;
   }, []);
-
   const budgetMoves = useMemo(() => planBudgetMoves(DATA, POLICY), []);
   const totals = useMemo(
-    () => DATA.reduce((a, r) => { a.impr += r.impr; a.clicks += r.clicks; a.spend += r.spend; a.sales += r.sales; a.orders += r.orders; return a; }, { impr: 0, clicks: 0, spend: 0, sales: 0, orders: 0 }),
+    () => DATA.reduce((a, r) => { a.impr+=r.impr; a.clicks+=r.clicks; a.spend+=r.spend; a.sales+=r.sales; a.orders+=r.orders; return a; }, { impr:0, clicks:0, spend:0, sales:0, orders:0 }),
     []
   );
-  const [receipt, setReceipt] = useState("{ pending }");
+
+  /* animate timeline after Start (STEPS is module-scoped: no deps warning) */
+  useEffect(() => {
+    if (!started) return;
+    let t: number | undefined;
+    let i = 0;
+
+    const advance = () => {
+      setActiveStep(STEPS[i]);
+      if (STEPS[i] === "Approval") setCanApprove(true);
+      i += 1;
+      if (i < STEPS.length) t = window.setTimeout(advance, 900);
+    };
+
+    setActiveStep("Plan");
+    t = window.setTimeout(advance, 800);
+    return () => { if (t) window.clearTimeout(t); };
+  }, [started]);
 
   function onStart() {
     setStarted(true);
     setApproved(false);
     setCanApprove(false);
+    setActiveStep(null);
     setReceipt("{ pending }");
-    // simple simulated gate to enable approval
-    setTimeout(() => setCanApprove(true), 900);
   }
 
   function onApprove() {
     setApproved(true);
     setCanApprove(false);
+    setActiveStep("Apply & Log");
     const changeSet = bidChanges.map((c) =>
       "newBid" in c
         ? { type: "bid_change", campaign: c.campaign, ad_group: c.adGroup, keyword: c.keyword, match: c.match, before: c.currentBid, after: c.newBid, rationale: c.rationale }
@@ -191,32 +247,23 @@ export default function Page() {
     <div style={styles.page}>
       <Nav />
       <div style={styles.wrap}>
-        <header style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-          <Image src="/aurora9-logo.jpg" alt="AURORA9 logo" width={200} height={48} priority style={{ height: 36, width: "auto", objectFit: "contain" }} />
-          <h1 style={{ fontSize: 22, margin: 0 }}>AURORA9 PPC / CPC / Bidding Agent</h1>
-          <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 8, border: "1px solid #e5e7eb", color: "#374151", background: "#f9fafb" }}>Seeded demo — no live APIs</span>
+        <header style={{ display:"flex", alignItems:"center", gap:12, marginBottom:8 }}>
+          <Image src="/aurora9-logo.jpg" alt="AURORA9 logo" width={200} height={48} priority style={{ height:36, width:"auto", objectFit:"contain" }} />
+          <h1 style={{ fontSize:22, margin:0 }}>AURORA9 PPC / CPC / Bidding Agent</h1>
+          <span style={{ fontSize:11, padding:"2px 6px", borderRadius:8, border:"1px solid #e5e7eb", color:"#374151", background:"#f9fafb" }}>Seeded demo — no live APIs</span>
         </header>
         <p style={styles.sub}>Keyword metrics + bid changes, negatives, and budget moves with governance & approval.</p>
 
         <div style={styles.grid}>
+          {/* LEFT: Metrics */}
           <section style={styles.card}>
             <h2 style={styles.section}>Seeded PPC Metrics</h2>
             <table style={styles.table}>
               <thead>
                 <tr>
-                  <th style={styles.th}>Campaign</th>
-                  <th style={styles.th}>Ad Group</th>
-                  <th style={styles.th}>Keyword</th>
-                  <th style={styles.th}>Match</th>
-                  <th style={styles.th}>Impr</th>
-                  <th style={styles.th}>Clicks</th>
-                  <th style={styles.th}>CTR</th>
-                  <th style={styles.th}>CPC</th>
-                  <th style={styles.th}>Spend</th>
-                  <th style={styles.th}>Sales</th>
-                  <th style={styles.th}>ROAS</th>
-                  <th style={styles.th}>ACoS</th>
-                  <th style={styles.th}>Bid</th>
+                  <th style={styles.th}>Campaign</th><th style={styles.th}>Ad Group</th><th style={styles.th}>Keyword</th><th style={styles.th}>Match</th>
+                  <th style={styles.th}>Impr</th><th style={styles.th}>Clicks</th><th style={styles.th}>CTR</th><th style={styles.th}>CPC</th>
+                  <th style={styles.th}>Spend</th><th style={styles.th}>Sales</th><th style={styles.th}>ROAS</th><th style={styles.th}>ACoS</th><th style={styles.th}>Bid</th>
                 </tr>
               </thead>
               <tbody>
@@ -240,66 +287,68 @@ export default function Page() {
               </tbody>
             </table>
 
-            <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
-              <button onClick={onStart} disabled={started && !canApprove} style={btn()}>
-                Start PPC Run
-              </button>
-              <button onClick={onApprove} disabled={!canApprove} style={btn()}>
-                Approve Changes
-              </button>
+            <div style={{ marginTop:12, display:"flex", gap:8, alignItems:"center" }}>
+              <button onClick={onStart} disabled={started && !canApprove} style={btn()}>Start PPC Run</button>
+              <button onClick={onApprove} disabled={!canApprove} style={btn()}>Approve Changes</button>
             </div>
 
-            <div style={{ marginTop: 10 }}>
+            <div style={{ marginTop:10 }}>
               <InlineNav current="ads" />
             </div>
           </section>
 
+          {/* MIDDLE: Timeline + Actions + Receipt */}
           <section style={styles.card}>
+            <h2 style={styles.section}>Agent Timeline</h2>
+            <ul style={{ listStyle:"none", margin:0, padding:0 }}>
+              {STEPS.map((label) => {
+                const isActive = activeStep === label;
+                const isDone = activeStep ? STEPS.indexOf(label) < STEPS.indexOf(activeStep) : false;
+                return (
+                  <li key={label} style={step(isActive, isDone)}>
+                    <div style={bullet(isActive, isDone)} />
+                    <div>
+                      <strong>{label}</strong>
+                      <div style={{ fontSize:12, color:"#374151" }}>
+                        {label === "Plan" && "Objective: hit target ROAS by campaign with bounded risk."}
+                        {label === "Load Metrics" && "Ingest last-30d seeded PPC metrics."}
+                        {label === "Propose Bids" && "Compute keyword bid ups/downs & negatives per policy."}
+                        {label === "Budget Realloc" && "Shift daily budget from lower to higher ROAS campaigns (capped)."}
+                        {label === "Approval" && "Human-in-the-loop before write."}
+                        {label === "Apply & Log" && "Emit change set + Governance Receipt + rollback token."}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
             <h2 style={styles.section}>Proposed Actions</h2>
             <pre style={styles.mono}>
-              {started
-                ? [
-                    ...bidChanges.map((c) =>
-                      "newBid" in c
-                        ? `- BID   | ${c.campaign} / ${c.adGroup} | "${c.keyword}" [${c.match}]  ${money(c.currentBid)} → ${money(c.newBid)}  — ${c.rationale}`
-                        : `- NEG   | ${c.campaign} / ${c.adGroup} | "${c.keyword}" [${c.match}]  — ${c.reason}`
-                    ),
-                    ...budgetMoves.map((m) => `- BUDGET| ${m.from} → ${m.to}  ${money(m.amount)}  — ${m.rationale}`),
-                  ].join("\n")
-                : "{ pending }"}
+              {[
+                ...bidChanges.map((c) =>
+                  "newBid" in c
+                    ? `- BID   | ${c.campaign} / ${c.adGroup} | "${c.keyword}" [${c.match}]  ${money(c.currentBid)} → ${money(c.newBid)}  — ${c.rationale}`
+                    : `- NEG   | ${c.campaign} / ${c.adGroup} | "${c.keyword}" [${c.match}]  — ${c.reason}`
+                ),
+                ...budgetMoves.map((m) => `- BUDGET| ${m.from} → ${m.to}  ${money(m.amount)}  — ${m.rationale}`),
+              ].join("\n")}
             </pre>
 
             <h2 style={styles.section}>Governance Receipt</h2>
             <pre style={styles.mono}>{approved ? receipt : started ? "{ awaiting approval }" : "{ pending }"}</pre>
           </section>
 
+          {/* RIGHT: KPIs */}
           <section style={styles.card}>
             <h2 style={styles.section}>KPIs</h2>
             <div style={styles.kpis}>
-              <div style={styles.kpi}>
-                <div style={styles.kpiLabel}>Spend</div>
-                <div style={styles.kpiValue}>{money(totals.spend)}</div>
-              </div>
-              <div style={styles.kpi}>
-                <div style={styles.kpiLabel}>Sales</div>
-                <div style={styles.kpiValue}>{money(totals.sales)}</div>
-              </div>
-              <div style={styles.kpi}>
-                <div style={styles.kpiLabel}>CTR</div>
-                <div style={styles.kpiValue}>{pct(totals.impr ? totals.clicks / totals.impr : 0)}</div>
-              </div>
-              <div style={styles.kpiWarn}>
-                <div style={styles.kpiLabel}>CPC</div>
-                <div style={styles.kpiValueWarn}>{money(totals.clicks ? totals.spend / totals.clicks : 0)}</div>
-              </div>
-              <div style={styles.kpiGood}>
-                <div style={styles.kpiLabel}>ROAS</div>
-                <div style={styles.kpiValueGood}>{(totals.spend ? totals.sales / totals.spend : 0).toFixed(2)}x</div>
-              </div>
-              <div style={styles.kpi}>
-                <div style={styles.kpiLabel}>ACoS</div>
-                <div style={styles.kpiValue}>{isFinite(totals.sales ? totals.spend / totals.sales : Infinity) ? pct(totals.sales ? totals.spend / totals.sales : 0) : "∞"}</div>
-              </div>
+              <div style={styles.kpi}><div style={styles.kpiLabel}>Spend</div><div style={styles.kpiValue}>{money(totals.spend)}</div></div>
+              <div style={styles.kpi}><div style={styles.kpiLabel}>Sales</div><div style={styles.kpiValue}>{money(totals.sales)}</div></div>
+              <div style={styles.kpi}><div style={styles.kpiLabel}>CTR</div><div style={styles.kpiValue}>{pct(totals.impr ? totals.clicks / totals.impr : 0)}</div></div>
+              <div style={styles.kpiWarn}><div style={styles.kpiLabel}>CPC</div><div style={styles.kpiValueWarn}>{money(totals.clicks ? totals.spend / totals.clicks : 0)}</div></div>
+              <div style={styles.kpiGood}><div style={styles.kpiLabel}>ROAS</div><div style={styles.kpiValueGood}>{(totals.spend ? totals.sales / totals.spend : 0).toFixed(2)}x</div></div>
+              <div style={styles.kpi}><div style={styles.kpiLabel}>ACoS</div><div style={styles.kpiValue}>{isFinite(totals.sales ? totals.spend / totals.sales : Infinity) ? pct(totals.sales ? totals.spend / totals.sales : 0) : "∞"}</div></div>
             </div>
           </section>
         </div>
