@@ -1,70 +1,59 @@
+// app/components/Nav.tsx
 "use client";
-
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const bar: React.CSSProperties = {
-  position: "sticky",
-  top: 0,
-  zIndex: 20,
-  background: "#ffffff",
-  borderBottom: "1px solid #e5e7eb",
-};
-
-const wrap: React.CSSProperties = {
-  maxWidth: 1120,
-  margin: "0 auto",
-  padding: "10px 16px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 16,
-};
-
-const brand: React.CSSProperties = {
-  fontWeight: 800,
-  letterSpacing: ".2px",
+const link = {
+  padding: "8px 12px",
+  borderRadius: 8,
   fontSize: 14,
+  textDecoration: "none",
   color: "#111",
-  whiteSpace: "nowrap",
 };
-
-const row: React.CSSProperties = { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" };
-
-function tabStyle(active: boolean): React.CSSProperties {
-  return {
-    fontSize: 13,
-    textDecoration: "none",
-    color: active ? "#111" : "#374151",
-    padding: "6px 10px",
-    borderRadius: 999,
-    border: active ? "1px solid #cbd5e1" : "1px solid transparent",
-    background: active ? "#f1f5f9" : "transparent",
-  };
-}
+const active = { background: "#f2f2f2" };
 
 export default function Nav() {
   const pathname = usePathname();
-  const tabs = [
-    { href: "/", label: "Governance" },
-    { href: "/ads", label: "PPC / Bidding" },
-    { href: "/inventory", label: "Inventory" },
-    { href: "/compliance", label: "Compliance" },
-    { href: "/pricing", label: "Pricing" },
-  ];
-
   return (
-    <div style={bar}>
-      <div style={wrap}>
-        <div style={brand}>AURORA9 Demos</div>
-        <div style={row}>
-          {tabs.map((t) => (
-            <Link key={t.href} href={t.href} style={tabStyle(pathname === t.href)}>
-              {t.label}
-            </Link>
-          ))}
-        </div>
+    <nav
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 50,
+        background: "#fff",
+        borderBottom: "1px solid #eee",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 1120,
+          margin: "0 auto",
+          display: "flex",
+          gap: 12,
+          alignItems: "center",
+          padding: "12px 16px",
+          fontFamily: 'Calibri, Arial, "Times New Roman", system-ui',
+        }}
+      >
+        <Link href="/" style={{ ...link, ...(pathname === "/" ? active : {}) }}>
+          Governance
+        </Link>
+        <Link href="/ads" style={{ ...link, ...(pathname === "/ads" ? active : {}) }}>
+          PPC / Bidding
+        </Link>
+        <Link href="/inventory" style={{ ...link, ...(pathname === "/inventory" ? active : {}) }}>
+          Inventory
+        </Link>
+        <Link href="/compliance" style={{ ...link, ...(pathname === "/compliance" ? active : {}) }}>
+          Compliance
+        </Link>
+        <Link href="/pricing" style={{ ...link, ...(pathname === "/pricing" ? active : {}) }}>
+          Pricing
+        </Link>
+        <Link href="/compare" style={{ ...link, ...(pathname === "/compare" ? active : {}) }}>
+          Compare
+        </Link>
       </div>
-    </div>
+    </nav>
   );
 }

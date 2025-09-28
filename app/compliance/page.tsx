@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import Image from "next/image";
 import Nav from "../components/Nav";
 import InlineNav from "../components/InlineNav";
+import DetailsPanel from "../components/DetailsPanel";
 
-type Control =
+/** Types */
+type StepId =
   | "Policy Pack Loaded"
   | "PII & Sensitive Data Scan"
   | "Model Card Check"
@@ -13,17 +15,22 @@ type Control =
   | "Approval Checkpoint"
   | "Apply & Immutable Log";
 
-type RiskLevel = "low" | "medium" | "high";
-
 type Finding = {
-  id: string;
+  risk: "Low" | "Medium" | "High";
   title: string;
-  level: RiskLevel;
   detail: string;
   remediation: string;
 };
 
-const CONTROLS: Control[] = [
+type Totals = {
+  issuesFound: number;
+  actionsBlocked: number;
+  timeToApprovalMin: number;
+  rollbackReady: boolean;
+};
+
+/** Seeded Data */
+const STEPS: StepId[] = [
   "Policy Pack Loaded",
   "PII & Sensitive Data Scan",
   "Model Card Check",
@@ -32,28 +39,25 @@ const CONTROLS: Control[] = [
   "Apply & Immutable Log",
 ];
 
-const SEED_FINDINGS: Finding[] = [
+const FINDINGS: Finding[] = [
   {
-    id: "C-101",
+    risk: "Medium",
     title: "PII detected in customer chat snippet",
-    level: "medium",
     detail:
       "Two email addresses and one phone number were found in the proposed training set.",
     remediation:
       "Mask emails and redact phone numbers using policy 'mask_pii_v2'. Re-run scan.",
   },
   {
-    id: "C-202",
+    risk: "Low",
     title: "Model usage outside approved region",
-    level: "low",
     detail:
-      "Staging worker selected eu-west-2; allowed regions are us-east, us-south.",
+      "Staging worker selected 'us-west-2'; allowed regions are 'us-east', 'us-south'.",
     remediation: "Pin region to 'us-east' for all workers in this project.",
   },
   {
-    id: "C-303",
+    risk: "High",
     title: "Action exceeds role-based guardrail",
-    level: "high",
     detail:
       "Agent attempted to increase daily budget by 40% (limit 25%) without approval token.",
     remediation:
@@ -61,227 +65,162 @@ const SEED_FINDINGS: Finding[] = [
   },
 ];
 
-const colors = {
-  bg: "#ffffff",
-  ink: "#111111",
-  muted: "#6b7280",
-  border: "#e5e7eb",
-  card: "#ffffff",
-  accent: "#1d4ed8",
-  good: "#0a7f2e",
-  warn: "#b45309",
-  bad: "#b91c1c",
-} as const;
+function beforeTotals(): Totals {
+  return { issuesFound: 3, actionsBlocked: 1, timeToApprovalMin: 12, rollbackReady: true };
+}
 
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    background: colors.bg,
-    color: colors.ink,
-    minHeight: "100vh",
-    fontFamily: 'Calibri, Arial, "Times New Roman", system-ui',
-    lineHeight: 1.35,
-  },
-  wrap: { maxWidth: 1120, margin: "24px auto", padding: "0 16px" },
-  h1: { fontSize: 22, margin: 0 },
-  sub: { color: colors.muted, fontSize: 14, margin: "2px 0 16px" },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "360px 1fr 320px",
-    gap: 16,
-  } as React.CSSProperties,
-  card: {
-    background: colors.card,
-    border: `1px solid ${colors.border}`,
-    borderRadius: 12,
-    padding: 16,
-  },
-  section: {
-    fontSize: 13,
-    letterSpacing: ".4px",
-    color: "#374151",
-    textTransform: "uppercase",
-    margin: "0 0 12px",
-  },
-  table: { width: "100%", borderCollapse: "collapse" },
-  th: {
-    fontSize: 12,
-    textAlign: "left",
-    padding: "6px 8px",
-    borderBottom: `1px solid ${colors.border}`,
-  },
-  td: {
-    fontSize: 12,
-    textAlign: "left",
-    padding: "6px 8px",
-    borderBottom: `1px solid ${colors.border}`,
-  },
-  mono: {
-    fontFamily: 'Consolas, "Courier New", monospace',
-    fontSize: 12,
-    color: "#111",
-    background: "#fff",
-    border: `1px solid ${colors.border}`,
-    borderRadius: 8,
-    padding: 8,
-    whiteSpace: "pre-wrap",
-    overflow: "auto",
-  },
-  kpis: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 8,
-  } as React.CSSProperties,
-  kpi: {
-    padding: 10,
-    border: `1px solid ${colors.border}`,
-    borderRadius: 10,
-    background: "#f9fafb",
-  },
-  kpiLabel: { fontSize: 12, color: colors.muted },
-  kpiValue: { fontSize: 18, marginTop: 2 },
-};
-
-function dot(level: RiskLevel): React.CSSProperties {
-  const bg =
-    level === "low" ? colors.good : level === "medium" ? colors.warn : colors.bad;
+function afterTotals(b: Totals): Totals {
   return {
-    width: 10,
-    height: 10,
-    borderRadius: "50%",
-    background: bg,
-    marginTop: 6,
-    flex: "0 0 10px",
-  };
-}
-function step(active: boolean, done: boolean): React.CSSProperties {
-  return {
-    display: "flex",
-    gap: 8,
-    alignItems: "flex-start",
-    padding: 10,
-    border: `1px solid ${colors.border}`,
-    borderRadius: 10,
-    background: done ? "#eef2ff" : "#f9fafb",
-    marginBottom: 8,
-    boxShadow: active ? "inset 0 0 0 2px #bfdbfe" : "none",
-  };
-}
-function bullet(active: boolean, done: boolean): React.CSSProperties {
-  return {
-    width: 10,
-    height: 10,
-    borderRadius: "50%",
-    marginTop: 6,
-    background: done ? colors.good : active ? colors.accent : "#d1d5db",
-    flex: "0 0 10px",
-  };
-}
-function btn(): React.CSSProperties {
-  return {
-    background: colors.accent,
-    color: "#fff",
-    border: "none",
-    padding: "10px 14px",
-    borderRadius: 10,
-    cursor: "pointer",
-    fontWeight: 600,
-    outlineColor: "#93c5fd",
+    issuesFound: b.issuesFound,
+    actionsBlocked: b.actionsBlocked,
+    timeToApprovalMin: Math.max(1, b.timeToApprovalMin - 8), // demo: 12 -> 4 min
+    rollbackReady: true,
   };
 }
 
 export default function Page() {
-  const [started, setStarted] = useState(false);
-  const [active, setActive] = useState<Control | null>(null);
-  const [approved, setApproved] = useState(false);
+  /** Flow */
+  const [active, setActive] = useState<StepId | null>(null);
   const [canApprove, setCanApprove] = useState(false);
-  const [findings, setFindings] = useState<Finding[]>(SEED_FINDINGS);
+  const [approved, setApproved] = useState(false);
 
-  // KPIs
-  const [issuesFound, setIssuesFound] = useState(3);
-  const [blockedActions, setBlockedActions] = useState(1);
-  const [timeToApprove, setTimeToApprove] = useState("—");
+  /** Panels */
+  const [detailsCleared, setDetailsCleared] = useState(true);
+  const [receipt, setReceipt] = useState<unknown>("{ pending }");
 
-  const receipt = useMemo(() => {
-    if (!approved) return "{ pending }";
-    return JSON.stringify(
-      {
-        run_id: "A9-COMPLY-001",
-        approved: true,
-        approver: "RiskOfficer@demo",
-        policy_pack: {
-          pii_masking: "mask_pii_v2",
-          region_allowlist: ["us-east", "us-south"],
-          budget_change_limit_pct: 25,
-        },
-        findings,
-        decision: "Proceed with masked data; enforce region; require approval for >25% deltas.",
-        rollback_token: "RBK-COMPLY-9f3c21",
-        timestamp: new Date().toISOString(),
-      },
-      null,
-      2
-    );
-  }, [approved, findings]);
+  /** KPIs */
+  const [afterMode, setAfterMode] = useState(false);
+  const totalsBefore = useMemo(beforeTotals, []);
+  const totalsAfter = useMemo(() => afterTotals(totalsBefore), [totalsBefore]);
+  const totals = afterMode ? totalsAfter : totalsBefore;
 
-  useEffect(() => {
-    if (!started) return;
-    let t: number | undefined;
-    const seq = [...CONTROLS];
+  /** Findings text + CSV */
+  const findingsText = FINDINGS.map((f) => {
+    const bullet = f.risk === "High" ? "*" : f.risk === "Medium" ? "-" : ".";
+    return `${bullet} [${f.risk}] ${f.title}
+Detail: ${f.detail}
+Remediation: ${f.remediation}`;
+  }).join("\n\n");
+
+  const findingsCsv = FINDINGS.map((f) => ({
+    risk: f.risk,
+    title: f.title,
+    detail: f.detail,
+    remediation: f.remediation,
+  }));
+
+  /** How it works text (ASCII only) */
+  const howText = [
+    "#1 Goal",
+    "Wrap LLM/agent actions with enterprise controls: load policy -> scan -> enforce guardrails -> human approval -> immutable log.",
+    "",
+    "#2 Columns",
+    "Left: Seeded findings and actions.",
+    "Middle: Control Timeline + Findings/Remediation + Receipt.",
+    "Right: KPIs (Before vs After).",
+    "",
+    "#3 Buttons",
+    "Start Compliance Run: plays the control checks.",
+    "Approve: permits exception(s), writes the receipt, flips KPIs to After.",
+    "Reset: clears timeline and panels, returns KPIs to Before.",
+    "",
+    "#4 Controls (demo)",
+    "PII Scan, Model Card check, Prompt/Action guardrails, Human checkpoint.",
+    "",
+    "#5 Receipt",
+    "Immutable-style payload with findings, before/after KPIs, control list, rollback token, timestamp.",
+  ].join("\n");
+
+  /** Timeline animation */
+  let timerRef: number | undefined;
+  const clearTimers = () => {
+    if (timerRef) {
+      clearTimeout(timerRef);
+      timerRef = undefined;
+    }
+  };
+  const startSequence = () => {
     let i = 0;
-
-    const advance = () => {
-      setActive(seq[i]);
-
-      if (seq[i] === "PII & Sensitive Data Scan") {
-        // simulate scan populating findings
-        setFindings(SEED_FINDINGS);
-        setIssuesFound(SEED_FINDINGS.length);
-      }
-      if (seq[i] === "Prompt/Action Guardrails") {
-        setBlockedActions(1);
-      }
-      if (seq[i] === "Approval Checkpoint") {
-        setCanApprove(true);
-        setTimeToApprove("~45s");
-      }
-
+    const tick = () => {
+      const s = STEPS[i];
+      setActive(s);
+      if (s === "Approval Checkpoint") setCanApprove(true);
       i += 1;
-      if (i < seq.length) t = window.setTimeout(advance, 900);
+      if (i < STEPS.length) timerRef = window.setTimeout(tick, 900);
     };
-
     setActive("Policy Pack Loaded");
-    t = window.setTimeout(advance, 800);
-    return () => {
-      if (t) window.clearTimeout(t);
-    };
-  }, [started]);
+    timerRef = window.setTimeout(tick, 900);
+  };
 
-  function onStart() {
-    setStarted(true);
+  /** Actions */
+  const onStart = () => {
+    clearTimers();
     setApproved(false);
     setCanApprove(false);
-    setIssuesFound(0);
-    setBlockedActions(0);
-    setTimeToApprove("—");
-  }
-  function onApprove() {
+    setAfterMode(false);
+    setDetailsCleared(false);
+    setReceipt("{ awaiting approval }");
+    startSequence();
+  };
+
+  const onApprove = () => {
+    if (!canApprove) return;
     setApproved(true);
     setCanApprove(false);
     setActive("Apply & Immutable Log");
-  }
+    setAfterMode(true);
 
+    setReceipt({
+      run_id: "A9-COMPLY-001",
+      approved: true,
+      findings: FINDINGS,
+      kpis_before: totalsBefore,
+      kpis_after: totalsAfter,
+      controls: STEPS,
+      rollback_token: "RBK-COMP-xx31",
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  const onResetAll = () => {
+    clearTimers();
+    setActive(null);
+    setApproved(false);
+    setCanApprove(false);
+    setAfterMode(false);
+    setDetailsCleared(true);
+    setReceipt("{ pending }");
+  };
+
+  /** Styles */
+  const styles: Record<string, React.CSSProperties> = {
+    page: { background: "#fff", color: "#111", minHeight: "100vh", fontFamily: 'Calibri, Arial, "Times New Roman", system-ui' },
+    wrap: { maxWidth: 1120, margin: "24px auto", padding: "0 16px" },
+    grid: { display: "grid", gridTemplateColumns: "360px 1fr 320px", gap: 16 },
+    card: { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16 },
+    section: { fontSize: 13, letterSpacing: ".3px", color: "#374151", textTransform: "uppercase", margin: "0 0 12px" },
+    th: { fontSize: 12, textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" },
+    td: { fontSize: 12, padding: "6px 8px", borderBottom: "1px solid #e5e7eb" },
+    btn: { background: "#1d4ed8", color: "#fff", border: "none", padding: "10px 14px", borderRadius: 10, fontWeight: 600, cursor: "pointer" },
+    subtle: { fontSize: 12, color: "#6b7280" },
+    badge: { fontSize: 11, padding: "2px 8px", borderRadius: 9999, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#374151", display: "inline-block", marginBottom: 8 },
+    kpiCard: { border: "1px solid #e5e7eb", borderRadius: 10, background: "#f9fafb", padding: 10 },
+  };
+  const item = (on: boolean): React.CSSProperties => ({
+    padding: 10,
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    background: "#f9fafb",
+    marginBottom: 8,
+    boxShadow: on ? "inset 0 0 0 2px #bfdbfe" : "none",
+  });
+
+  /** Render */
   return (
     <div style={styles.page}>
       <Nav />
       <div style={styles.wrap}>
-        <header
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            marginBottom: 8,
-          }}
-        >
+        <header style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
           <Image
             src="/aurora9-logo.jpg"
             alt="AURORA9 logo"
@@ -290,47 +229,32 @@ export default function Page() {
             priority
             style={{ height: 36, width: "auto", objectFit: "contain" }}
           />
-          <h1 style={styles.h1}>AURORA9 Compliance & Governance Demo</h1>
-          <span
-            style={{
-              fontSize: 11,
-              padding: "2px 6px",
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              background: "#f9fafb",
-            }}
-          >
-            Seeded demo — no live APIs
+          <h1 style={{ fontSize: 22, margin: 0 }}>AURORA9 Compliance Demo</h1>
+          <span style={{ fontSize: 11, padding: "2px 6px", border: "1px solid #e5e7eb", borderRadius: 8, background: "#f9fafb", color: "#374151" }}>
+            Seeded demo - no live APIs
           </span>
         </header>
-        <p style={styles.sub}>
-          Showcase how <strong>watsonx.governance</strong> concepts map to
-          AURORA9: load policies, scan data, enforce guardrails, require human
-          approval, then log an immutable receipt.
+
+        <p style={styles.subtle}>
+          Showcase how watsonx.governance concepts map to AURORA9: load policies, scan data, enforce guardrails, require human approval, then log an immutable receipt.
         </p>
 
         <div style={styles.grid}>
-          {/* LEFT: Findings + Controls */}
+          {/* LEFT: Findings */}
           <section style={styles.card}>
             <h2 style={styles.section}>Findings (Seeded)</h2>
-            <table style={styles.table}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  <th style={styles.th}>Risk</th>
-                  <th style={styles.th}>Title</th>
-                  <th style={styles.th}>Detail</th>
-                  <th style={styles.th}>Remediation</th>
+                  {["Risk", "Title", "Detail", "Remediation"].map((h) => (
+                    <th key={h} style={styles.th}>{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {findings.map((f) => (
-                  <tr key={f.id}>
-                    <td style={styles.td}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div style={dot(f.level)} />
-                        <span style={{ textTransform: "capitalize" }}>{f.level}</span>
-                      </div>
-                    </td>
+                {FINDINGS.map((f) => (
+                  <tr key={f.title}>
+                    <td style={styles.td}>{f.risk}</td>
                     <td style={styles.td}>{f.title}</td>
                     <td style={styles.td}>{f.detail}</td>
                     <td style={styles.td}>{f.remediation}</td>
@@ -340,77 +264,81 @@ export default function Page() {
             </table>
 
             <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-              <button onClick={onStart} disabled={started && !canApprove} style={btn()}>
-                Start Compliance Run
-              </button>
-              <button onClick={onApprove} disabled={!canApprove} style={btn()}>
-                Approve
-              </button>
+              <button type="button" onClick={onStart} style={styles.btn}>Start Compliance Run</button>
+              <button type="button" onClick={onApprove} disabled={!canApprove} style={styles.btn}>Approve</button>
             </div>
 
-            {/* Consistent inline nav */}
             <div style={{ marginTop: 10 }}>
               <InlineNav current="compliance" />
             </div>
           </section>
 
-          {/* MIDDLE: Timeline + Receipt */}
+          {/* MIDDLE: Timeline + Panels */}
           <section style={styles.card}>
             <h2 style={styles.section}>Control Timeline</h2>
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {CONTROLS.map((c) => {
-                const isActive = active === c;
-                const isDone = active ? CONTROLS.indexOf(c) < CONTROLS.indexOf(active) : false;
-                return (
-                  <li key={c} style={step(isActive, isDone)}>
-                    <div style={bullet(isActive, isDone)} />
-                    <div>
-                      <strong>{c}</strong>
-                      <div style={{ fontSize: 12, color: "#374151" }}>
-                        {c === "Policy Pack Loaded" &&
-                          "Load risk policies (PII masking, region, budget bands)."}
-                        {c === "PII & Sensitive Data Scan" &&
-                          "Scan proposed data/actions; classify and mask as needed."}
-                        {c === "Model Card Check" &&
-                          "Verify model + prompt against approved model cards."}
-                        {c === "Prompt/Action Guardrails" &&
-                          "Enforce role-based constraints and safe change bands."}
-                        {c === "Approval Checkpoint" &&
-                          "Human-in-the-loop validation for exceptions."}
-                        {c === "Apply & Immutable Log" &&
-                          "Apply remediated changes; write audit receipt + rollback token."}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
+              {STEPS.map((s) => (
+                <li key={s} style={item(active === s)}>
+                  <strong>{s}</strong>
+                </li>
+              ))}
             </ul>
 
-            <h2 style={styles.section}>Governance Receipt</h2>
-            <pre style={styles.mono}>
-              {approved ? receipt : started ? "{ awaiting approval }" : "{ pending }"}
-            </pre>
+            <DetailsPanel
+              heading="Findings & Remediation"
+              detailsText={detailsCleared ? "{ pending }" : findingsText}
+              techData={detailsCleared ? "{ pending }" : { findings: FINDINGS }}
+              csvRows={detailsCleared ? undefined : findingsCsv}
+              fileBase="aurora9-compliance-findings"
+              onReset={onResetAll}
+            />
+            <div style={{ marginTop: 8 }}>
+              <button type="button" onClick={onResetAll} style={styles.btn}>Reset Findings</button>
+            </div>
+
+            <DetailsPanel
+              heading="Governance Receipt"
+              detailsText={approved ? "Receipt created. Use the technical toggle for full payload." : "{ pending }"}
+              techData={receipt}
+              fileBase="aurora9-compliance-receipt"
+              onReset={onResetAll}
+              variant="receipt"
+            />
+            <div style={{ marginTop: 8 }}>
+              <button type="button" onClick={onResetAll} style={styles.btn}>Reset Receipt</button>
+            </div>
+
+            <DetailsPanel
+              heading="How it works"
+              detailsText={howText}
+              fileBase="aurora9-compliance-howto"
+            />
           </section>
 
           {/* RIGHT: KPIs */}
           <section style={styles.card}>
             <h2 style={styles.section}>KPIs</h2>
-            <div style={styles.kpis}>
-              <div style={styles.kpi}>
-                <div style={styles.kpiLabel}>Issues Found</div>
-                <div style={styles.kpiValue}>{issuesFound}</div>
+            <div style={styles.badge}>{afterMode ? "After (simulated)" : "Before"}</div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div style={styles.kpiCard}>
+                <div style={styles.subtle}>Issues Found</div>
+                <div style={{ fontSize: 18 }}>{totals.issuesFound}</div>
               </div>
-              <div style={styles.kpi}>
-                <div style={styles.kpiLabel}>Actions Blocked</div>
-                <div style={styles.kpiValue}>{blockedActions}</div>
+              <div style={styles.kpiCard}>
+                <div style={styles.subtle}>Actions Blocked</div>
+                <div style={{ fontSize: 18 }}>{totals.actionsBlocked}</div>
               </div>
-              <div style={styles.kpi}>
-                <div style={styles.kpiLabel}>Time to Approval</div>
-                <div style={styles.kpiValue}>{timeToApprove}</div>
+              <div style={styles.kpiCard}>
+                <div style={styles.subtle}>Time to Approval</div>
+                <div style={{ fontSize: 18 }}>
+                  {totals.timeToApprovalMin}
+                  <span style={{ fontSize: 13, color: "#6b7280" }}> min</span>
+                </div>
               </div>
-              <div style={styles.kpi}>
-                <div style={styles.kpiLabel}>Rollback Ready</div>
-                <div style={styles.kpiValue}>Yes</div>
+              <div style={styles.kpiCard}>
+                <div style={styles.subtle}>Rollback Ready</div>
+                <div style={{ fontSize: 18 }}>{totals.rollbackReady ? "Yes" : "No"}</div>
               </div>
             </div>
           </section>
